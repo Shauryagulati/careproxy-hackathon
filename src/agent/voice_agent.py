@@ -10,6 +10,9 @@ Run with: python src/agent/voice_agent.py dev
 import logging
 
 from dotenv import load_dotenv
+from openinference.instrumentation.openai import OpenAIInstrumentor
+from opentelemetry import trace
+from phoenix.otel import register
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -33,6 +36,21 @@ load_dotenv()
 # Configure logging for debugging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("careproxy")
+
+# -----------------------------------------------------------------------------
+# Phoenix Observability Setup
+# -----------------------------------------------------------------------------
+# Initialize Phoenix tracing to track all OpenAI calls
+# View traces at http://localhost:6006
+tracer_provider = register(
+    project_name="careproxy",
+    endpoint="http://localhost:6006/v1/traces",
+)
+OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
+logger.info("Phoenix tracing initialized - view at http://localhost:6006")
+
+# Get tracer for custom spans
+tracer = trace.get_tracer("careproxy")
 
 # System prompt defining the agent's personality and behavior
 INSTRUCTIONS = """You are CareProxy, a compassionate and knowledgeable healthcare navigation assistant designed to help family caregivers.
@@ -127,6 +145,28 @@ async def entrypoint(ctx: JobContext):
     # -------------------------------------------------------------------------
     # AgentSession manages the lifecycle of the voice interaction
     session = AgentSession()
+
+    # -------------------------------------------------------------------------
+    # Step 5: Set up conversation tracing
+    # -------------------------------------------------------------------------
+    # Track conversation events for observability in Phoenix
+
+    @session.on("user_input_transcribed")
+    def on_user_input(event):
+        """Called when user speech is transcribed to text."""
+        with tracer.start_as_current_span("user_message") as span:
+            span.set_attribute("message.role", "user")
+            span.set_attribute("message.content", event.transcript)
+            span.set_attribute("participant.identity", participant.identity)
+            logger.info(f"User said: {event.transcript}")
+
+    @session.on("agent_speech_committed")
+    def on_agent_speech(event):
+        """Called when agent finishes speaking a response."""
+        with tracer.start_as_current_span("agent_message") as span:
+            span.set_attribute("message.role", "assistant")
+            span.set_attribute("message.content", event.content)
+            logger.info(f"Agent said: {event.content}")
 
     # Start the agent session with the room for audio I/O
     logger.info("Starting agent session...")
