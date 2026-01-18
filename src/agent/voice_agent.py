@@ -7,12 +7,18 @@ with OpenAI integration for speech-to-text, text-to-speech, and conversation.
 Run with: python src/agent/voice_agent.py dev
 """
 
+import json
 import logging
+from datetime import datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
 from openinference.instrumentation.openai import OpenAIInstrumentor
 from opentelemetry import trace
 from phoenix.otel import register
+
+from triage import assess_conversation
+from reports import generate_caregiver_report, generate_physician_report
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -93,6 +99,74 @@ Remember: Gather information FIRST, then assess. Never rush to judgment."""
 
 
 # -----------------------------------------------------------------------------
+# Conversation Data Persistence
+# -----------------------------------------------------------------------------
+
+
+def save_conversation_data(transcript: str) -> dict:
+    """
+    Save conversation with triage assessment and reports.
+
+    Creates two files:
+    - conversations/latest.json: Most recent conversation (overwritten each time)
+    - conversations/history.json: Last 10 conversations
+
+    Args:
+        transcript: The full conversation transcript
+
+    Returns:
+        dict: The saved conversation data
+    """
+    logger.info("Saving conversation data...")
+
+    # Create conversations directory if it doesn't exist
+    Path("conversations").mkdir(exist_ok=True)
+
+    # Get triage assessment
+    logger.info("Running triage assessment...")
+    triage_data = assess_conversation(transcript)
+
+    # Generate both reports
+    logger.info("Generating reports...")
+    caregiver_report = generate_caregiver_report(triage_data, transcript)
+    physician_report = generate_physician_report(triage_data, transcript)
+
+    # Create data structure
+    conversation_data = {
+        "timestamp": datetime.now().isoformat(),
+        "transcript": transcript,
+        "triage": triage_data,
+        "caregiver_report": caregiver_report,
+        "physician_report": physician_report,
+    }
+
+    # Save as latest.json (always overwrite)
+    with open("conversations/latest.json", "w") as f:
+        json.dump(conversation_data, f, indent=2)
+
+    # Also append to history
+    history_file = Path("conversations/history.json")
+    try:
+        with open(history_file, "r") as f:
+            history = json.load(f)
+    except FileNotFoundError:
+        history = []
+
+    history.append(conversation_data)
+    # Keep only last 10
+    history = history[-10:]
+
+    with open(history_file, "w") as f:
+        json.dump(history, f, indent=2)
+
+    logger.info("Conversation saved to conversations/latest.json")
+    print(f"\n✅ Conversation saved to conversations/latest.json")
+    print(f"   Urgency: {triage_data.get('urgency_emoji', '')} {triage_data.get('urgency_level', 'unknown').upper()}")
+
+    return conversation_data
+
+
+# -----------------------------------------------------------------------------
 # Agent Setup
 # -----------------------------------------------------------------------------
 
@@ -164,13 +238,18 @@ async def entrypoint(ctx: JobContext):
     session = AgentSession()
 
     # -------------------------------------------------------------------------
-    # Step 5: Set up conversation tracing
+    # Step 5: Set up transcript collection and conversation tracing
     # -------------------------------------------------------------------------
-    # Track conversation events for observability in Phoenix
+    # Collect all messages into a transcript for saving later
+    transcript_lines: list[str] = []
 
     @session.on("user_input_transcribed")
     def on_user_input(event):
         """Called when user speech is transcribed to text."""
+        # Add to transcript
+        transcript_lines.append(f"User: {event.transcript}")
+
+        # Trace for Phoenix observability
         with tracer.start_as_current_span("user_message") as span:
             span.set_attribute("message.role", "user")
             span.set_attribute("message.content", event.transcript)
@@ -180,10 +259,29 @@ async def entrypoint(ctx: JobContext):
     @session.on("agent_speech_committed")
     def on_agent_speech(event):
         """Called when agent finishes speaking a response."""
+        # Add to transcript
+        transcript_lines.append(f"Agent: {event.content}")
+
+        # Trace for Phoenix observability
         with tracer.start_as_current_span("agent_message") as span:
             span.set_attribute("message.role", "assistant")
             span.set_attribute("message.content", event.content)
             logger.info(f"Agent said: {event.content}")
+
+    @session.on("close")
+    def on_session_close(event):
+        """Called when the session ends - save conversation data."""
+        logger.info(f"Session closed: {event.reason}")
+
+        # Only save if we have conversation content
+        if len(transcript_lines) > 0:
+            full_transcript = "\n\n".join(transcript_lines)
+            try:
+                save_conversation_data(full_transcript)
+            except Exception as e:
+                logger.error(f"Failed to save conversation: {e}")
+        else:
+            logger.info("No conversation content to save")
 
     # Start the agent session with the room for audio I/O
     logger.info("Starting agent session...")
