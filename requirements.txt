@@ -1,0 +1,8 @@
+livekit
+livekit-agents
+livekit-plugins-openai
+openai
+python-dotenv
+arize-phoenix
+arize-phoenix-otel
+openinference-instrumentation-openai
