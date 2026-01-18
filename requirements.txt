@@ -1,6 +1,7 @@
 livekit
 livekit-agents
 livekit-plugins-openai
+livekit-plugins-silero
 openai
 python-dotenv
 arize-phoenix

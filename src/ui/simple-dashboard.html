@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CareProxy - Conversation Summary</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .chat-user {
+            background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+        }
+        .chat-agent {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+        }
+        .urgency-emergency { background-color: #fef2f2; border-color: #ef4444; color: #991b1b; }
+        .urgency-urgent { background-color: #fffbeb; border-color: #f59e0b; color: #92400e; }
+        .urgency-routine { background-color: #f0fdf4; border-color: #22c55e; color: #166534; }
+        .urgency-monitor { background-color: #f9fafb; border-color: #9ca3af; color: #4b5563; }
+        pre { white-space: pre-wrap; word-wrap: break-word; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-6xl mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center">
+                        <span class="text-white text-xl">+</span>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-gray-900">CareProxy</h1>
+                        <p class="text-sm text-gray-500">Conversation Summary</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <label class="cursor-pointer bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium">
+                        Load JSON File
+                        <input type="file" id="fileInput" accept=".json" class="hidden">
+                    </label>
+                    <button onclick="togglePastePanel()" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-sm font-medium">
+                        Paste JSON
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Paste Panel (hidden by default) -->
+    <div id="pastePanel" class="hidden bg-white border-b border-gray-200 shadow-sm">
+        <div class="max-w-6xl mx-auto px-4 py-4">
+            <textarea id="jsonInput" class="w-full h-32 p-3 border border-gray-300 rounded-lg font-mono text-sm" placeholder="Paste your JSON here..."></textarea>
+            <div class="mt-2 flex gap-2">
+                <button onclick="loadFromTextarea()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium">
+                    Load Data
+                </button>
+                <button onclick="togglePastePanel()" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-sm font-medium">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="max-w-6xl mx-auto px-4 py-6">
+        <!-- Timestamp -->
+        <div id="timestampBar" class="mb-6 text-sm text-gray-500">
+            <span id="timestamp">Loading demo data...</span>
+        </div>
+
+        <!-- Grid Layout -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            <!-- Section 1: Transcript -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                    <h2 class="font-semibold text-gray-900 flex items-center gap-2">
+                        <span>💬</span> Conversation Transcript
+                    </h2>
+                </div>
+                <div id="transcriptSection" class="p-4 max-h-96 overflow-y-auto space-y-3">
+                    <!-- Chat bubbles will be inserted here -->
+                </div>
+            </div>
+
+            <!-- Section 2: Triage Assessment -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                    <h2 class="font-semibold text-gray-900 flex items-center gap-2">
+                        <span>🏥</span> Triage Assessment
+                    </h2>
+                </div>
+                <div id="triageSection" class="p-4">
+                    <!-- Triage data will be inserted here -->
+                </div>
+            </div>
+
+            <!-- Section 3: Caregiver Report -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                    <h2 class="font-semibold text-gray-900 flex items-center gap-2">
+                        <span>👨‍👩‍👧</span> Caregiver Report
+                    </h2>
+                </div>
+                <div id="caregiverSection" class="p-4 max-h-96 overflow-y-auto">
+                    <pre class="text-sm text-gray-700 font-sans"></pre>
+                </div>
+            </div>
+
+            <!-- Section 4: Physician Report -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                    <h2 class="font-semibold text-gray-900 flex items-center gap-2">
+                        <span>👨‍⚕️</span> Physician Report
+                    </h2>
+                </div>
+                <div id="physicianSection" class="p-4 max-h-96 overflow-y-auto">
+                    <pre class="text-sm text-gray-700 font-mono"></pre>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Real conversation data from latest.json
+        const DEMO_DATA = {
+            "timestamp": "2026-01-18T07:14:42.177457",
+            "transcript": "User: Bye.\n\nUser: I'm feeling chest pains.\n\nUser: They started this morning and it's paining quite a lot.\n\nUser: I think I'm feeling dizziness.\n\nUser: No.\n\nUser: who got it.",
+            "triage": {
+                "urgency_level": "emergency",
+                "urgency_emoji": "🔴",
+                "chief_complaint": "chest pains",
+                "key_symptoms": ["chest pains", "dizziness"],
+                "severity_score": null,
+                "duration": "since this morning",
+                "red_flags": ["chest pain with dizziness"],
+                "recommendation": "Call 911 immediately.",
+                "reasoning": "Chest pain accompanied by dizziness can indicate a serious cardiovascular issue that requires immediate medical attention.",
+                "questions_asked": []
+            },
+            "caregiver_report": "📋 CAREPROXY ASSESSMENT SUMMARY\nGenerated: January 18, 2026 at 07:14 AM\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nWHAT WE DISCUSSED:\nWe discussed chest pains. This has been going on for since this morning.\n\n🔴 EMERGENCY\n\nRECOMMENDATION:\nCall 911 immediately.\n\nWARNING SIGNS TO WATCH FOR:\n  - chest pain with dizziness\n\nWHAT WE LEARNED:\n  - Chief concern: Chest pains\n  - Severity: Not specified\n  - Duration: since this morning\n  - Key symptoms: chest pains, dizziness\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️  This assessment is for guidance only and does not replace medical advice.\n    If symptoms worsen or you're concerned, seek medical attention immediately.",
+            "physician_report": "PATIENT ENCOUNTER SUMMARY - CAREPROXY\nGenerated: 2026-01-18 07:14:42 UTC\nDocument ID: CPX-20260118071442\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nCHIEF COMPLAINT:\nchest pains\n\nHISTORY OF PRESENT ILLNESS:\nPatient/caregiver reports chest pains. Symptoms have been present for since this morning. Associated symptoms include: chest pains, dizziness. Red flags identified: chest pain with dizziness.\n\nSYMPTOM ASSESSMENT:\n  - Severity: Not assessed\n  - Duration: since this morning\n  - Onset: Not specified\n  - Associated symptoms:\n  - chest pains\n  - dizziness\n\nRED FLAGS IDENTIFIED:\n  - chest pain with dizziness\n\nTRIAGE ASSESSMENT:\n  Level: EMERGENCY\n  Reasoning: Chest pain accompanied by dizziness can indicate a serious cardiovascular issue that requires immediate medical attention.\n\nCLINICAL QUESTIONS ASKED:\nNot documented\n\nRECOMMENDATIONS:\nCall 911 immediately.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nCONVERSATION TRANSCRIPT:\n\nUser: Bye.\n\nUser: I'm feeling chest pains.\n\nUser: They started this morning and it's paining quite a lot.\n\nUser: I think I'm feeling dizziness.\n\nUser: No.\n\nUser: who got it.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nDISCLAIMER: This is an automated triage assessment generated by CareProxy.\nClinical correlation is required. This document does not constitute a\nmedical diagnosis or replace professional medical evaluation."
+        };
+
+        // Toggle paste panel visibility
+        function togglePastePanel() {
+            const panel = document.getElementById('pastePanel');
+            panel.classList.toggle('hidden');
+        }
+
+        // Load data from textarea
+        function loadFromTextarea() {
+            const jsonText = document.getElementById('jsonInput').value;
+            try {
+                const data = JSON.parse(jsonText);
+                renderData(data);
+                togglePastePanel();
+            } catch (e) {
+                alert('Invalid JSON: ' + e.message);
+            }
+        }
+
+        // File input handler
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        renderData(data);
+                    } catch (err) {
+                        alert('Invalid JSON file: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        // Render all data to the page
+        function renderData(data) {
+            // Update timestamp
+            const timestamp = new Date(data.timestamp);
+            document.getElementById('timestamp').textContent =
+                `Conversation from: ${timestamp.toLocaleDateString()} at ${timestamp.toLocaleTimeString()}`;
+
+            // Render transcript
+            renderTranscript(data.transcript);
+
+            // Render triage
+            renderTriage(data.triage);
+
+            // Render caregiver report
+            document.querySelector('#caregiverSection pre').textContent = data.caregiver_report || 'No report available';
+
+            // Render physician report
+            document.querySelector('#physicianSection pre').textContent = data.physician_report || 'No report available';
+        }
+
+        // Render transcript as chat bubbles
+        function renderTranscript(transcript) {
+            const container = document.getElementById('transcriptSection');
+            container.innerHTML = '';
+
+            if (!transcript) {
+                container.innerHTML = '<p class="text-gray-500 text-sm">No transcript available</p>';
+                return;
+            }
+
+            const lines = transcript.split('\n\n');
+            lines.forEach(line => {
+                if (line.trim() === '') return;
+
+                const isUser = line.startsWith('User:');
+                const isAgent = line.startsWith('Agent:');
+
+                if (!isUser && !isAgent) return;
+
+                const content = line.replace(/^(User|Agent):\s*/, '');
+
+                const bubble = document.createElement('div');
+                bubble.className = `p-3 rounded-lg ${isUser ? 'chat-user ml-8' : 'chat-agent mr-8'}`;
+
+                const label = document.createElement('div');
+                label.className = `text-xs font-semibold mb-1 ${isUser ? 'text-indigo-700' : 'text-green-700'}`;
+                label.textContent = isUser ? 'Patient/Caregiver' : 'CareProxy';
+
+                const text = document.createElement('div');
+                text.className = 'text-sm text-gray-800';
+                text.textContent = content;
+
+                bubble.appendChild(label);
+                bubble.appendChild(text);
+                container.appendChild(bubble);
+            });
+        }
+
+        // Render triage assessment
+        function renderTriage(triage) {
+            const container = document.getElementById('triageSection');
+
+            if (!triage) {
+                container.innerHTML = '<p class="text-gray-500 text-sm">No triage data available</p>';
+                return;
+            }
+
+            const urgencyClass = `urgency-${triage.urgency_level || 'monitor'}`;
+
+            container.innerHTML = `
+                <!-- Urgency Badge -->
+                <div class="mb-4 p-4 rounded-lg border-2 ${urgencyClass}">
+                    <div class="flex items-center gap-2">
+                        <span class="text-2xl">${triage.urgency_emoji || '⚪'}</span>
+                        <span class="text-lg font-bold uppercase">${triage.urgency_level || 'Unknown'}</span>
+                    </div>
+                </div>
+
+                <!-- Chief Complaint -->
+                <div class="mb-4">
+                    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">Chief Complaint</h3>
+                    <p class="text-gray-900">${triage.chief_complaint || 'Not specified'}</p>
+                </div>
+
+                <!-- Key Metrics -->
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div class="bg-gray-50 p-3 rounded-lg">
+                        <div class="text-xs text-gray-500 uppercase">Severity</div>
+                        <div class="text-xl font-bold text-gray-900">${triage.severity_score ? triage.severity_score + '/10' : 'N/A'}</div>
+                    </div>
+                    <div class="bg-gray-50 p-3 rounded-lg">
+                        <div class="text-xs text-gray-500 uppercase">Duration</div>
+                        <div class="text-xl font-bold text-gray-900">${triage.duration || 'N/A'}</div>
+                    </div>
+                </div>
+
+                <!-- Symptoms -->
+                <div class="mb-4">
+                    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Key Symptoms</h3>
+                    <div class="flex flex-wrap gap-2">
+                        ${(triage.key_symptoms || []).map(s =>
+                            `<span class="bg-gray-100 text-gray-700 px-2 py-1 rounded text-sm">${s}</span>`
+                        ).join('') || '<span class="text-gray-500 text-sm">None reported</span>'}
+                    </div>
+                </div>
+
+                <!-- Red Flags -->
+                ${(triage.red_flags && triage.red_flags.length > 0) ? `
+                <div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <h3 class="text-sm font-semibold text-red-700 uppercase tracking-wide mb-2">⚠️ Red Flags</h3>
+                    <ul class="list-disc list-inside text-sm text-red-700">
+                        ${triage.red_flags.map(f => `<li>${f}</li>`).join('')}
+                    </ul>
+                </div>
+                ` : ''}
+
+                <!-- Recommendation -->
+                <div class="mb-4">
+                    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">Recommendation</h3>
+                    <p class="text-gray-900 text-sm">${triage.recommendation || 'Consult a healthcare provider'}</p>
+                </div>
+
+                <!-- Reasoning -->
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">Reasoning</h3>
+                    <p class="text-gray-600 text-sm">${triage.reasoning || 'No reasoning provided'}</p>
+                </div>
+            `;
+        }
+
+        // Load demo data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            renderData(DEMO_DATA);
+        });
+    </script>
+</body>
+</html>
